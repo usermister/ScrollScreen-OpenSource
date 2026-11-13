@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           $env:GO111MODULE = 'off'
-          go vet -unsafeptr=false main.go
+          go vet main.go
 
       - name: Run Go unit tests
         shell: pwsh
