@@ -71,3 +71,18 @@ Developed with AI assistance (OpenAI ChatGPT). The maintainer is responsible for
 ## License
 
 Distributed under the MIT License. See [LICENSE](LICENSE).
+
+
+## Code Signing
+
+ScrollScreen is currently distributed as an unsigned
+open-source application.
+
+The project intends to use SignPath Foundation
+for free open-source code signing.
+
+Code signing has not yet been approved or enabled.
+
+For details, see our
+[Code Signing Policy](CODE_SIGNING_POLICY.md).
+
