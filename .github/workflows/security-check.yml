@@ -1,0 +1,45 @@
+name: ScrollScreen Security Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-check:
+    name: Go Code Analysis
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+
+      - name: Check Go source code
+        shell: pwsh
+        run: |
+          $env:GO111MODULE = 'off'
+          go vet -unsafeptr=false main.go
+
+      - name: Run Go unit tests
+        shell: pwsh
+        run: |
+          $env:GO111MODULE = 'off'
+          go test -v main.go main_test.go
+
+      - name: Verify Windows compilation
+        shell: pwsh
+        run: |
+          $env:GO111MODULE = 'off'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          go build -trimpath -o ScrollScreen-check.exe main.go
