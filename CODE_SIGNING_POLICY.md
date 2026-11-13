@@ -15,9 +15,23 @@ Only `ScrollScreen.exe` for Windows x64, built from this repository in a reviewe
 5. Publish signed artifact, version/tag, and checksums; never relabel an unsigned artifact as signed.
 6. If an artifact or signer is compromised, stop releases, remove the artifact and contact the signing provider.
 
+
 ## Roles and identity
 
-Project maintainers, code reviewers, and release approvers: **TBD by repository owner**. All publishing accounts must enable MFA.
+Project owner and maintainer: [usermister](https://github.com/usermister)
+
+- Author / Committer: usermister
+- Reviewer: usermister (for external pull requests)
+- Release and signing approver: usermister
+
+The project is currently maintained by one person.
+
+The maintainer uses multi-factor authentication
+for GitHub access.
+
+Every signing request must be explicitly approved
+by the maintainer before release.
+
 
 ## Third-party signing
 
