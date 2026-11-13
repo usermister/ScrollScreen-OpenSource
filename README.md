@@ -86,3 +86,15 @@ Code signing has not yet been approved or enabled.
 For details, see our
 [Code Signing Policy](CODE_SIGNING_POLICY.md).
 
+
+## Privacy
+
+ScrollScreen is designed to process screenshots locally
+on the user's Windows computer.
+
+Screenshots may contain sensitive information.
+Users should review and redact images before sharing.
+
+For details, see our [Privacy Policy](PRIVACY.md).
+
+
