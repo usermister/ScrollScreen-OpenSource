@@ -124,6 +124,7 @@ var (
 	pGlobalLock             = kernel32.NewProc("GlobalLock")
 	pGlobalUnlock           = kernel32.NewProc("GlobalUnlock")
 	pGlobalFree             = kernel32.NewProc("GlobalFree")
+	pRtlMoveMemory          = syscall.NewLazyDLL("ntdll.dll").NewProc("RtlMoveMemory")
 
 	mainWnd                      uintptr
 	rawPaintPath                 string
@@ -692,6 +693,58 @@ func refreshLanguage() {
 		pInvalidateRect.Call(editorWnd, 0, 0)
 	}
 }
+
+// Windows owns HGLOBAL after SetClipboardData succeeds. Copy into the locked
+// Windows allocation through RtlMoveMemory rather than constructing a Go
+// pointer from the uintptr returned by GlobalLock.
+func writeGlobalMemory(mem uintptr, data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	ptr, _, _ := pGlobalLock.Call(mem)
+	if ptr == 0 {
+		return false
+	}
+	pRtlMoveMemory.Call(ptr, uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)))
+	runtime.KeepAlive(data)
+	pGlobalUnlock.Call(mem)
+	return true
+}
+
+// Windows CF_HDROP: 20-byte DROPFILES header, UTF-16 path, double terminator.
+func dropfilesBytes(path string) []byte {
+	utf := syscall.StringToUTF16(path)
+	b := make([]byte, 20+(len(utf)+1)*2)
+	binary.LittleEndian.PutUint32(b[0:4], 20)
+	binary.LittleEndian.PutUint32(b[16:20], 1) // fWide
+	for i, v := range utf {
+		binary.LittleEndian.PutUint16(b[20+i*2:22+i*2], v)
+	}
+	return b
+}
+
+// Windows CF_DIB: BITMAPINFOHEADER followed by bottom-up BGRA pixels.
+// BI_RGB 32-bit DIB expects reserved alpha bytes (set to zero).
+func dibBytes(out *image.RGBA) []byte {
+	w, h := out.Bounds().Dx(), out.Bounds().Dy()
+	b := make([]byte, 40+w*h*4)
+	binary.LittleEndian.PutUint32(b[0:4], 40)
+	binary.LittleEndian.PutUint32(b[4:8], uint32(w))
+	binary.LittleEndian.PutUint32(b[8:12], uint32(h))
+	binary.LittleEndian.PutUint16(b[12:14], 1)
+	binary.LittleEndian.PutUint16(b[14:16], 32)
+	binary.LittleEndian.PutUint32(b[20:24], uint32(w*h*4))
+	for y := 0; y < h; y++ {
+		sourceY := out.Bounds().Min.Y + h - 1 - y
+		for x := 0; x < w; x++ {
+			i := out.PixOffset(out.Bounds().Min.X+x, sourceY)
+			j := 40 + (y*w+x)*4
+			b[j], b[j+1], b[j+2], b[j+3] = out.Pix[i+2], out.Pix[i+1], out.Pix[i], 0
+		}
+	}
+	return b
+}
+
 func copyZIP() {
 	img := redactedImage()
 	if img == nil {
@@ -734,29 +787,17 @@ func copyZIP() {
 		return
 	}
 	// CF_HDROP contains a DROPFILES header followed by UTF-16 absolute paths and a double terminator.
-	utf := syscall.StringToUTF16(zipPath)
-	total := 20 + (len(utf)+1)*2
-	mem, _, _ := pGlobalAlloc.Call(GMEM_MOVEABLE, uintptr(total))
+	buf := dropfilesBytes(zipPath)
+	mem, _, _ := pGlobalAlloc.Call(GMEM_MOVEABLE, uintptr(len(buf)))
 	if mem == 0 {
 		message("ZIP saved at:\n" + zipPath + "\n\nClipboard allocation failed.")
 		return
 	}
-	ptr, _, _ := pGlobalLock.Call(mem)
-	if ptr == 0 {
+	if !writeGlobalMemory(mem, buf) {
 		pGlobalFree.Call(mem)
 		message("ZIP saved at:\n" + zipPath + "\nClipboard lock failed.")
 		return
 	}
-	b := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), total)
-	for i := range b {
-		b[i] = 0
-	}
-	binary.LittleEndian.PutUint32(b[0:4], 20)  // DROPFILES.pFiles
-	binary.LittleEndian.PutUint32(b[16:20], 1) // DROPFILES.fWide = TRUE
-	for i, v := range utf {
-		binary.LittleEndian.PutUint16(b[20+i*2:22+i*2], v)
-	}
-	pGlobalUnlock.Call(mem)
 	ok, _, _ := pOpenClipboard.Call(editorWnd)
 	if ok == 0 {
 		pGlobalFree.Call(mem)
@@ -805,30 +846,17 @@ func copyRedacted() {
 		message("Image is too large.")
 		return
 	}
-	byteCount := 40 + w*h*4
-	mem, _, _ := pGlobalAlloc.Call(GMEM_MOVEABLE, uintptr(byteCount))
+	buf := dibBytes(out)
+	mem, _, _ := pGlobalAlloc.Call(GMEM_MOVEABLE, uintptr(len(buf)))
 	if mem == 0 {
 		message("Clipboard allocation failed.")
 		return
 	}
-	ptr, _, _ := pGlobalLock.Call(mem)
-	if ptr == 0 {
+	if !writeGlobalMemory(mem, buf) {
 		pGlobalFree.Call(mem)
 		message("Clipboard memory lock failed.")
 		return
 	}
-	b := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), byteCount)
-	info := bitmapinfoheader{Size: 40, Width: int32(w), Height: int32(h), Planes: 1, BitCount: 32, Compression: BI_RGB, SizeImage: uint32(w * h * 4)}
-	copy(b[:40], unsafe.Slice((*byte)(unsafe.Pointer(&info)), 40))
-	for y := 0; y < h; y++ {
-		sourceY := h - 1 - y
-		for x := 0; x < w; x++ {
-			i := out.PixOffset(x, sourceY)
-			j := 40 + (y*w+x)*4
-			b[j], b[j+1], b[j+2], b[j+3] = out.Pix[i+2], out.Pix[i+1], out.Pix[i], 0
-		}
-	}
-	pGlobalUnlock.Call(mem)
 	ok, _, _ := pOpenClipboard.Call(editorWnd)
 	if ok == 0 {
 		pGlobalFree.Call(mem)
